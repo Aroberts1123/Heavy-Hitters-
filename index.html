@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Heavy Hitters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --field: #16261C;
+    --field-deep: #0F1B14;
+    --chalk: #F1EEE4;
+    --chalk-dim: #B9C2B7;
+    --amber: #E7A93D;
+    --loss: #B4483A;
+    --line: #2C3F31;
+    box-sizing: border-box;
+  }
+  * { box-sizing: inherit; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: linear-gradient(180deg, var(--field) 0%, var(--field-deep) 100%);
+    color: var(--chalk);
+    font-family: 'Inter', -apple-system, sans-serif;
+  }
+  .score { font-family: 'Oswald', sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 48px; }
+  .league-name { color: var(--chalk-dim); font-size: 13px; font-weight: 500; letter-spacing: 0.3px; margin-bottom: 6px; }
+  .week-hero { font-size: 40px; font-weight: 700; line-height: 1; margin-bottom: 20px; }
+  .btn {
+    background: transparent; border: 1px solid var(--line); color: var(--chalk);
+    border-radius: 3px; padding: 7px 14px; font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+  }
+  .tabs { display: flex; gap: 22px; margin: 16px 0 18px; border-bottom: 1px solid var(--line); }
+  .tab-btn {
+    background: none; border: none; cursor: pointer; padding: 0 0 10px;
+    font-size: 13px; font-weight: 600; color: var(--chalk-dim);
+    border-bottom: 2px solid transparent; font-family: inherit;
+  }
+  .tab-btn.active { color: var(--amber); border-bottom-color: var(--amber); }
+  .row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 10px 4px; border-bottom: 1px solid var(--line);
+  }
+  .row:hover { background: rgba(231,169,61,0.06); }
+  .rank { color: var(--chalk-dim); font-size: 13px; width: 20px; display: inline-block; }
+  .team-name { font-size: 15px; font-weight: 500; }
+  .dk-handle { font-size: 11px; color: var(--chalk-dim); font-weight: 400; }
+  .pts { font-size: 20px; font-weight: 600; }
+  .pts.lead { color: var(--amber); }
+  .week-chip {
+    background: transparent; color: var(--chalk-dim); border: 1px solid var(--line);
+    border-radius: 3px; padding: 5px 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; margin-right: 6px; margin-bottom: 8px; font-family: inherit;
+  }
+  .week-chip.active { background: var(--amber); color: var(--field-deep); border-color: var(--amber); }
+  .section-label { font-size: 12px; font-weight: 600; color: var(--chalk-dim); margin: 22px 0 10px; }
+  .barchart-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+  .barchart-label { width: 110px; flex-shrink: 0; color: var(--chalk-dim); text-align: right; }
+  .barchart-track { flex: 1; background: var(--line); border-radius: 2px; height: 14px; overflow: hidden; }
+  .barchart-fill { background: var(--amber); height: 100%; border-radius: 2px; }
+  .barchart-val { width: 50px; flex-shrink: 0; font-family: 'Oswald', sans-serif; font-weight: 600; }
+  .muted { color: var(--chalk-dim); font-size: 14px; line-height: 1.6; }
+  .payout-note { font-size: 12px; color: var(--chalk-dim); margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="muted">Loading…</div>
+</div>
+
+<script>
+const PAYOUT_RANK = (rank, payouts) => rank === 1 ? payouts.first : rank === 2 ? payouts.second : 0;
+
+function ownerLabel(dk, owners) {
+  const owner = owners[(dk || "").toUpperCase()];
+  if (!owner) return `<span class="team-name">${escapeHtml(dk)}</span>`;
+  return `<span class="team-name">${escapeHtml(owner)} <span class="dk-handle">(${escapeHtml(dk)})</span></span>`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+function fmt(n) { return Number.isInteger(n) ? String(n) : n.toFixed(2); }
+
+function computeStandings(data) {
+  const weekNums = Object.keys(data.weeks).sort((a, b) => Number(a) - Number(b));
+  const map = {};
+  const weeklyWinners = [];
+
+  weekNums.forEach(w => {
+    const rows = [...data.weeks[w]].sort((a, b) => b.points - a.points);
+    const teamCount = rows.length;
+    const finishers = [];
+    let i = 0;
+    while (i < rows.length) {
+      let j = i;
+      while (j + 1 < rows.length && rows[j + 1].points === rows[i].points) j++;
+      const tieSize = j - i + 1;
+      let placementSum = 0, payoutSum = 0;
+      for (let rank = i + 1; rank <= j + 1; rank++) {
+        placementSum += teamCount - rank + 1;
+        payoutSum += PAYOUT_RANK(rank, data.payouts);
+      }
+      const sharedPts = placementSum / tieSize;
+      const sharedPayout = payoutSum / tieSize;
+      const winsSpot1 = (i + 1 === 1);
+      for (let k = i; k <= j; k++) {
+        const r = rows[k];
+        if (!map[r.team]) map[r.team] = { team: r.team, total: 0, wins: 0, weeks: 0, weeklyPayout: 0 };
+        map[r.team].total += sharedPts;
+        map[r.team].weeks += 1;
+        map[r.team].weeklyPayout += sharedPayout;
+        if (winsSpot1) map[r.team].wins += 1;
+      }
+      if (payoutSum > 0) {
+        for (let k = i; k <= j; k++) finishers.push({ team: rows[k].team, amount: sharedPayout });
+      }
+      i = j + 1;
+    }
+    weeklyWinners.push({ week: w, finishers });
+  });
+
+  const ranked = Object.values(map).sort((a, b) => b.total - a.total);
+  const standings = ranked.map((s, idx) => {
+    const seasonPayout = data.payouts.season[idx] || 0;
+    return { ...s, seasonPayout, payout: s.weeklyPayout + seasonPayout };
+  });
+
+  return { weekNums, standings, weeklyWinners };
+}
+
+function weekPayoutMap(rows, payouts) {
+  const sorted = [...rows].sort((a, b) => b.points - a.points);
+  const out = {};
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1].points === sorted[i].points) j++;
+    let payoutSum = 0;
+    for (let rank = i + 1; rank <= j + 1; rank++) payoutSum += PAYOUT_RANK(rank, payouts);
+    if (payoutSum === 0) break;
+    const shared = payoutSum / (j - i + 1);
+    for (let k = i; k <= j; k++) out[sorted[k].team] = shared;
+    i = j + 1;
+  }
+  return out;
+}
+
+async function main() {
+  const app = document.getElementById('app');
+  let data;
+  try {
+    const res = await fetch('data.json', { cache: 'no-store' });
+    data = await res.json();
+  } catch (e) {
+    app.innerHTML = '<div class="muted">Couldn\'t load results — check that data.json is in the same folder.</div>';
+    return;
+  }
+
+  const { weekNums, standings, weeklyWinners } = computeStandings(data);
+  let state = { tab: 'weekly', activeWeek: weekNums[weekNums.length - 1] || null };
+
+  function render() {
+    let html = '';
+    html += `<div class="league-name">${escapeHtml(data.leagueName)}</div>`;
+    html += `<div class="week-hero score">${state.activeWeek ? 'Week ' + state.activeWeek : 'No results yet'}</div>`;
+
+    if (weekNums.length === 0) {
+      html += '<div class="muted">No results yet.</div>';
+      app.innerHTML = html;
+      return;
+    }
+
+    html += '<div class="tabs">';
+    [['weekly','Weekly results'],['season','Season standings'],['payouts','Payouts'],['teams','Teams']].forEach(([key,label]) => {
+      html += `<button class="tab-btn ${state.tab===key?'active':''}" data-tab="${key}">${label}</button>`;
+    });
+    html += '</div>';
+
+    if (state.tab === 'weekly') {
+      html += '<div>';
+      weekNums.forEach(w => {
+        html += `<button class="week-chip ${state.activeWeek===w?'active':''}" data-week="${w}">W${w}</button>`;
+      });
+      html += '</div>';
+      const rows = [...data.weeks[state.activeWeek]].sort((a,b) => b.points - a.points);
+      const payMap = weekPayoutMap(rows, data.payouts);
+      rows.forEach((r, i) => {
+        const amt = payMap[r.team];
+        html += `<div class="row">
+          <div style="display:flex;align-items:baseline;gap:12px;">
+            <span class="rank score">${i+1}</span>
+            ${ownerLabel(r.team, data.teamOwners)}
+            ${amt != null ? `<span style="font-size:11px;font-weight:600;color:${i===0?'var(--amber)':'var(--chalk-dim)'};">$${fmt(amt)}</span>` : ''}
+          </div>
+          <span class="pts score ${i===0?'lead':''}">${r.points.toFixed(1)}</span>
+        </div>`;
+      });
+    }
+
+    if (state.tab === 'season') {
+      const maxTotal = Math.max(...standings.map(s => s.total), 1);
+      html += '<div>';
+      standings.forEach(s => {
+        const pct = Math.max(4, (s.total / maxTotal) * 100);
+        html += `<div class="barchart-row">
+          <div class="barchart-label">${escapeHtml(data.teamOwners[(s.team||'').toUpperCase()] || s.team)}</div>
+          <div class="barchart-track"><div class="barchart-fill" style="width:${pct}%"></div></div>
+          <div class="barchart-val score">${s.total.toFixed(1)}</div>
+        </div>`;
+      });
+      html += '</div>';
+      standings.forEach((s, i) => {
+        html += `<div class="row">
+          <div style="display:flex;align-items:baseline;gap:12px;">
+            <span class="rank score">${i+1}</span>
+            ${ownerLabel(s.team, data.teamOwners)}
+            <span style="font-size:11px;color:var(--chalk-dim);">${s.wins} win${s.wins===1?'':'s'} · ${s.weeks} wk${s.weeks===1?'':'s'}</span>
+          </div>
+          <span class="pts score">${s.total.toFixed(1)}</span>
+        </div>`;
+      });
+    }
+
+    if (state.tab === 'payouts') {
+      const totalPool = weekNums.length * (data.payouts.first + data.payouts.second);
+      html += `<div class="payout-note">$${data.payouts.first} to 1st and $${data.payouts.second} to 2nd each week · paid out so far: $${totalPool} · season-long pays the top 4 at $${data.payouts.season.join(' / $')}</div>`;
+
+      html += '<div class="section-label">Weekly winners</div>';
+      weeklyWinners.forEach(({week, finishers}) => {
+        html += `<div class="row" style="font-size:13px;">
+          <span class="rank score" style="width:44px;">W${week}</span>
+          <span style="flex:1;">`;
+        finishers.forEach((f, idx) => {
+          if (idx > 0) html += `<span style="color:var(--chalk-dim);">  ·  </span>`;
+          html += `<span style="color:${idx===0?'var(--amber)':'var(--chalk)'};font-weight:${idx===0?600:500};">${ownerLabel(f.team, data.teamOwners)}</span> <span style="color:var(--chalk-dim);">($${fmt(f.amount)})</span>`;
+        });
+        html += `</span></div>`;
+      });
+
+      html += '<div class="section-label">Season-long — top 4 if it ended today</div>';
+      standings.slice(0,4).forEach((s, i) => {
+        html += `<div class="row">
+          <div style="display:flex;align-items:baseline;gap:12px;">
+            <span class="rank score">${i+1}</span>
+            ${ownerLabel(s.team, data.teamOwners)}
+          </div>
+          <span class="pts score" style="font-size:15px;color:var(--amber);">$${s.seasonPayout}</span>
+        </div>`;
+      });
+
+      html += '<div class="section-label">Total payouts by team (weekly wins)</div>';
+      [...standings].sort((a,b) => b.weeklyPayout - a.weeklyPayout).forEach((s, i) => {
+        html += `<div class="row">
+          <div style="display:flex;align-items:baseline;gap:12px;">
+            <span class="rank score">${i+1}</span>
+            ${ownerLabel(s.team, data.teamOwners)}
+          </div>
+          <span class="pts score" style="color:${s.weeklyPayout>0?'var(--amber)':'var(--chalk-dim)'};">$${fmt(s.weeklyPayout)}</span>
+        </div>`;
+      });
+    }
+
+    if (state.tab === 'teams') {
+      html += '<div class="payout-note">DraftKings handle → owner</div>';
+      Object.entries(data.teamOwners).sort((a,b) => a[1].localeCompare(b[1])).forEach(([dk, name]) => {
+        html += `<div class="row">
+          <span class="team-name">${escapeHtml(name)}</span>
+          <span class="score" style="font-size:13px;color:var(--chalk-dim);">${escapeHtml(dk)}</span>
+        </div>`;
+      });
+    }
+
+    app.innerHTML = html;
+
+    app.querySelectorAll('[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => { state.tab = btn.dataset.tab; render(); });
+    });
+    app.querySelectorAll('[data-week]').forEach(btn => {
+      btn.addEventListener('click', () => { state.activeWeek = btn.dataset.week; render(); });
+    });
+  }
+
+  render();
+}
+
+main();
+</script>
+</body>
+</html>
